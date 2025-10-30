@@ -1,4 +1,14 @@
 import { requireAuth } from "../../utils/auth.js";
+import {
+  cacheAside,
+  invalidateCachePattern,
+  invalidateMultiple,
+} from "../../utils/redis.js";
+import {
+  cacheTTL,
+  cachePrefix,
+  getCacheKey,
+} from "../../config/cache-config.js";
 
 export const commentResolvers = {
   Query: {
@@ -9,15 +19,27 @@ export const commentResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, task_id, user_id, text, created_at
-         FROM comments
-         ORDER BY created_at DESC 
-         LIMIT $1 OFFSET $2`,
-          [limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.commentsList,
+          `page:${pagination?.page || 1}`,
+          `limit:${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, task_id, user_id, text, created_at
+               FROM comments
+               ORDER BY created_at DESC 
+               LIMIT $1 OFFSET $2`,
+              [limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch all comments: ", error);
         throw error;
@@ -28,18 +50,26 @@ export const commentResolvers = {
       try {
         requireAuth(context);
 
-        const result = await context.db.query(
-          `SELECT id, task_id, user_id, text, created_at
-         FROM comments
-         WHERE id = $1`,
-          [id]
+        const cacheKey = getCacheKey(cachePrefix.comment, id);
+
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, task_id, user_id, text, created_at
+               FROM comments
+               WHERE id = $1`,
+              [id]
+            );
+
+            if (result.rows.length === 0) {
+              throw new Error("Comment not found!");
+            }
+
+            return result.rows[0];
+          },
+          cacheTTL.comment
         );
-
-        if (result.rows.length === 0) {
-          throw new Error("Commen not found!");
-        }
-
-        return result.rows[0];
       } catch (error) {
         console.error("Error fetch comment: ", error);
         throw error;
@@ -53,20 +83,29 @@ export const commentResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, task_id, user_id, text, created_at
-         FROM comments
-         WHERE task_id = $1
-         ORDER BY created_at DESC
-         LIMIT $2 OFFSET $3`,
-          [taskId, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.commentsByTask,
+          taskId,
+          `page:${pagination?.page || 1}`,
+          `limit:${limit}`
         );
 
-        if (result.rows.length === 0) {
-          throw new Error("Comment not found!");
-        }
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, task_id, user_id, text, created_at
+               FROM comments
+               WHERE task_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3`,
+              [taskId, limit, offset]
+            );
 
-        return result.rows;
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch comment by task: ", error);
         throw error;
@@ -80,20 +119,29 @@ export const commentResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, task_id, user_id, text, created_at
-         FROM comments
-         WHERE user_id = $1
-         ORDER BY created_at DESC
-         LIMIT $2 OFFSET $3`,
-          [userId, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.commentsByUser,
+          userId,
+          `page:${pagination?.page || 1}`,
+          `limit:${limit}`
         );
 
-        if (result.rows.length === 0) {
-          throw new Error("Comment not found!");
-        }
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, task_id, user_id, text, created_at
+               FROM comments
+               WHERE user_id = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3`,
+              [userId, limit, offset]
+            );
 
-        return result.rows;
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch comment by user: ", error);
         throw error;
@@ -124,6 +172,20 @@ export const commentResolvers = {
           [task_id, context.user.id, text]
         );
 
+        // invalidate cache
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsList, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByTask, task_id, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByUser, context.user.id, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.comment, cachePrefix.user, context.user.id)
+        );
+
         return result.rows[0];
       } catch (error) {
         console.error("Error create comment: ", error);
@@ -137,16 +199,18 @@ export const commentResolvers = {
 
         const { text } = input;
 
-        const comment = await context.db.query(
-          "SELECT user_id FROM comments WHERE id = $1",
+        const checkResult = await context.db.query(
+          "SELECT task_id, user_id FROM comments WHERE id = $1",
           [id]
         );
 
-        if (comment.rows.length === 0) {
+        if (checkResult.rows.length === 0) {
           throw new Error("Comment not found!");
         }
 
-        if (comment.rows[0].user_id !== context.user.id) {
+        const comment = checkResult.rows[0];
+
+        if (comment.user_id !== context.user.id) {
           throw new Error("Unauthorized to update this comment!");
         }
 
@@ -156,6 +220,18 @@ export const commentResolvers = {
          WHERE id = $2
          RETURNING id, task_id, user_id, text, created_at`,
           [text, id]
+        );
+
+        // invalidate cache
+        await invalidateMultiple([getCacheKey(cachePrefix.comment, id)]);
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsList, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByTask, comment.task_id, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByUser, context.user.id, "*")
         );
 
         return result.rows[0];
@@ -169,26 +245,41 @@ export const commentResolvers = {
       try {
         requireAuth(context);
 
-        const comment = await context.db.query(
-          "SELECT user_id FROM comments WHERE id = $1",
+        const checkResult = await db.query(
+          "SELECT task_id, user_id FROM comments WHERE id = $1",
           [id]
         );
 
-        if (comment.rows.length === 0) {
+        if (checkResult.rows.length === 0) {
           return {
             success: false,
-            message: "Comment not found!",
+            message: "Comment not found",
           };
         }
 
-        if (comment.rows[0].user_id !== context.user.id) {
-          return {
-            success: false,
-            message: "Unauthorized to delete this comment!",
-          };
+        const comment = checkResult.rows[0];
+
+        if (comment.user_id !== context.user.id) {
+          throw new Error("Not authorized to delete this comment");
         }
 
-        await context.db.query("DELETE FROM comments WHERE id = $1", [id]);
+        // Delete
+        await db.query("DELETE FROM comments WHERE id = $1", [id]);
+
+        // Invalidate affected caches
+        await invalidateMultiple([getCacheKey(cachePrefix.comment, id)]);
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsList, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByTask, comment.task_id, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByUser, comment.user_id, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.comment, cachePrefix.user, comment.user.id)
+        );
 
         return {
           success: true,

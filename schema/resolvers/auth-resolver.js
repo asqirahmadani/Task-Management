@@ -1,23 +1,37 @@
 import { generateToken, requireAuth } from "../../utils/auth.js";
+import { cacheAside } from "../../utils/redis.js";
 import bcrypt from "bcryptjs";
+import {
+  getCacheKey,
+  cachePrefix,
+  cacheTTL,
+} from "../../config/cache-config.js";
 
 export const authResolvers = {
   Query: {
     me: async (_, __, context) => {
       requireAuth(context);
 
-      const result = await context.db.query(
-        "SELECT id, name, email, created_at FROM users WHERE id = $1",
-        [context.user.id]
+      const cacheKey = getCacheKey(cachePrefix.user, context.user.id);
+
+      return cacheAside(
+        cacheKey,
+        async () => {
+          const result = await context.db.query(
+            "SELECT id, name, email, created_at FROM users WHERE id = $1",
+            [context.user.id]
+          );
+
+          const user = result.rows[0];
+
+          if (!user) {
+            throw new Error("User not found!");
+          }
+
+          return user;
+        },
+        cacheTTL.user
       );
-
-      const user = result.rows[0];
-
-      if (!user) {
-        throw new Error("User not found!");
-      }
-
-      return user;
     },
   },
 

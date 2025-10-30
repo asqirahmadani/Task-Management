@@ -1,15 +1,19 @@
-import pool from "./config/database.js";
+import { getCacheKey, cachePrefix, cacheTTL } from "./config/cache-config.js";
 
-const testConnection = async () => {
-  try {
-    const result = await pool.query("SELECT NOW()");
-    console.log("✅ Connection successful!");
-    console.log("⏰ Server time:", result.rows[0].now);
-  } catch (error) {
-    console.error("❌ Connection failed:", error);
-  } finally {
-    await pool.end();
-  }
+const page = 1;
+const limit = 10;
+
+const filter = {
+  status: "PENDING",
+  priority: "MEDIUM",
 };
 
-testConnection();
+console.log(
+  getCacheKey(
+    cachePrefix.tasksList,
+    cachePrefix.search,
+    JSON.stringify(filter),
+    `page:${page}`,
+    `limit:${limit}`
+  )
+);

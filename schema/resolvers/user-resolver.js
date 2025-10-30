@@ -1,5 +1,15 @@
 import { requireAuth } from "../../utils/auth.js";
 import bcrypt from "bcryptjs";
+import {
+  cacheAside,
+  invalidateCache,
+  invalidateCachePattern,
+} from "../../utils/redis.js";
+import {
+  cacheTTL,
+  cachePrefix,
+  getCacheKey,
+} from "../../config/cache-config.js";
 
 export const userResolvers = {
   Query: {
@@ -7,17 +17,25 @@ export const userResolvers = {
       try {
         requireAuth(context);
 
-        const result = await context.db.query(
-          "SELECT id, name, email, created_at FROM users WHERE id = $1",
-          [id]
+        const cacheKey = getCacheKey(cachePrefix.user, id);
+
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              "SELECT id, name, email, created_at FROM users WHERE id = $1",
+              [id]
+            );
+
+            const user = result.rows[0];
+            if (!user) {
+              throw new Error("User not found!");
+            }
+
+            return user;
+          },
+          cacheTTL.user
         );
-
-        const user = result.rows[0];
-        if (!user) {
-          throw new Error("User not found!");
-        }
-
-        return user;
       } catch (error) {
         console.error("Error fetch user: ", error);
         throw error;
@@ -31,15 +49,27 @@ export const userResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, name, email, created_at
-         FROM users
-         ORDER BY created_at DESC
-         LIMIT $1 OFFSET $2`,
-          [limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.usersList,
+          `page:${pagination.page || 1}`,
+          `limit:${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, name, email, created_at
+               FROM users
+               ORDER BY created_at DESC
+               LIMIT $1 OFFSET $2`,
+              [limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch all users: ", error);
         throw error;
@@ -53,15 +83,28 @@ export const userResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, name, email, created_at
-         FROM users
-         WHERE name ILIKE $1
-         LIMIT $2 OFFSET $3`,
-          [`%${name}%`, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.usersList,
+          cachePrefix.search,
+          `page:${pagination.page || 1}`,
+          `limit:${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, name, email, created_at
+               FROM users
+               WHERE name ILIKE $1
+               LIMIT $2 OFFSET $3`,
+              [`%${name}%`, limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.search
+        );
       } catch (error) {
         console.error("Error search users: ", error);
         throw error;
@@ -118,8 +161,12 @@ export const userResolvers = {
 
         const updatedUser = result.rows[0];
 
-        // update cache
-        context.loaders.userLoader.prime(userId, updatedUser);
+        // invalidate affected caches
+        await invalidateCache(getCacheKey(cachePrefix.user, userId));
+        await invalidateCachePattern(getCacheKey(cachePrefix.usersList, "*"));
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.usersList, cachePrefix.search, "*")
+        );
 
         return updatedUser;
       } catch (error) {
@@ -186,6 +233,22 @@ export const userResolvers = {
             message: "User not found!",
           };
         }
+
+        // invalidate all related caches
+        await invalidateCache(getCacheKey(cachePrefix.user, id));
+        await invalidateCachePattern(getCacheKey(cachePrefix.usersList, "*"));
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.usersList, cachePrefix.search, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, id)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, id)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByUser, id)
+        );
 
         return {
           success: true,

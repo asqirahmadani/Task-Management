@@ -1,4 +1,14 @@
 import { requireAuth } from "../../utils/auth.js";
+import {
+  cacheAside,
+  invalidateCachePattern,
+  invalidateMultiple,
+} from "../../utils/redis.js";
+import {
+  cacheTTL,
+  cachePrefix,
+  getCacheKey,
+} from "../../config/cache-config.js";
 
 export const taskResolvers = {
   Query: {
@@ -9,50 +19,64 @@ export const taskResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const conditions = [];
-        const values = [];
-        let paramCount = 1;
-
-        if (filter?.status) {
-          conditions.push(`status = $${paramCount}`);
-          values.push(filter.status);
-          paramCount++;
-        }
-
-        if (filter?.priority) {
-          conditions.push(`priority = $${paramCount}`);
-          values.push(filter.priority);
-          paramCount++;
-        }
-
-        if (filter?.assigned_to) {
-          conditions.push(`assigned_to = $${paramCount}`);
-          values.push(filter.assigned_to);
-          paramCount++;
-        }
-
-        if (filter?.created_by) {
-          conditions.push(`created_by = $${paramCount}`);
-          values.push(filter.created_by);
-          paramCount++;
-        }
-
-        const whereClause =
-          conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-        values.push(limit, offset);
-
-        const result = await context.db.query(
-          `SELECT id, title, description, status, priority, 
-                assigned_to, created_by, created_at, updated_at 
-         FROM tasks 
-         ${whereClause} 
-         ORDER BY created_at DESC 
-         LIMIT $${paramCount} OFFSET $${paramCount + 1}`,
-          values
+        const cacheKey = getCacheKey(
+          cachePrefix.tasksList,
+          cachePrefix.search,
+          JSON.stringify(filter),
+          `page:${pagination?.page || 1}`,
+          `limit${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const conditions = [];
+            const values = [];
+            let paramCount = 1;
+
+            if (filter?.status) {
+              conditions.push(`status = $${paramCount}`);
+              values.push(filter.status);
+              paramCount++;
+            }
+
+            if (filter?.priority) {
+              conditions.push(`priority = $${paramCount}`);
+              values.push(filter.priority);
+              paramCount++;
+            }
+
+            if (filter?.assigned_to) {
+              conditions.push(`assigned_to = $${paramCount}`);
+              values.push(filter.assigned_to);
+              paramCount++;
+            }
+
+            if (filter?.created_by) {
+              conditions.push(`created_by = $${paramCount}`);
+              values.push(filter.created_by);
+              paramCount++;
+            }
+
+            const whereClause =
+              conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+            values.push(limit, offset);
+
+            const result = await context.db.query(
+              `SELECT id, title, description, status, priority, 
+                      assigned_to, created_by, created_at, updated_at 
+               FROM tasks 
+               ${whereClause} 
+               ORDER BY created_at DESC 
+               LIMIT $${paramCount} OFFSET $${paramCount + 1}`,
+              values
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch all tasks: ", error);
         throw error;
@@ -63,20 +87,28 @@ export const taskResolvers = {
       try {
         requireAuth(context);
 
-        const result = await context.db.query(
-          `SELECT id, title, description, status, priority,
-                assigned_to, created_by, created_at, updated_at
-         FROM tasks
-         WHERE id = $1`,
-          [id]
+        const cacheKey = getCacheKey(cachePrefix.task, id);
+
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, title, description, status, priority,
+                    assigned_to, created_by, created_at, updated_at
+             FROM tasks
+             WHERE id = $1`,
+              [id]
+            );
+
+            const task = result.rows[0];
+            if (!task) {
+              throw new Error("Task not found!");
+            }
+
+            return task;
+          },
+          cacheTTL.task
         );
-
-        const task = result.rows[0];
-        if (!task) {
-          throw new Error("Task not found!");
-        }
-
-        return task;
       } catch (error) {
         console.error("Error fetch task: ", error);
         throw error;
@@ -90,16 +122,30 @@ export const taskResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, title, description, status, priority,
-                assigned_to, created_by, created_at, updated_at
-         FROM tasks
-         WHERE status = $1
-         LIMIT $2 OFFSET $3`,
-          [status, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.tasksByStatus,
+          status,
+          `page:${pagination?.page || 1}`,
+          `limit${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, title, description, status, priority,
+                      assigned_to, created_by, created_at, updated_at
+               FROM tasks
+               WHERE status = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3`,
+              [status, limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch task by status: ", error);
         throw error;
@@ -113,16 +159,30 @@ export const taskResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, title, description, status, priority,
-                assigned_to, created_by, created_at, updated_at
-         FROM tasks
-         WHERE priority = $1
-         LIMIT $2 OFFSET $3`,
-          [priority, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.tasksByPriority,
+          priority,
+          `page:${pagination?.page || 1}`,
+          `limit${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, title, description, status, priority,
+                      assigned_to, created_by, created_at, updated_at
+               FROM tasks
+               WHERE priority = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3`,
+              [priority, limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch task by priority: ", error);
         throw error;
@@ -136,17 +196,30 @@ export const taskResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, title, description, status, priority,
-                assigned_to, created_by, created_at, updated_at
-         FROM tasks
-         WHERE assigned_to = $1
-         ORDER BY created_at DESC
-         LIMIT $2 OFFSET $3`,
-          [context.user.id, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.myTasks,
+          context.user.id,
+          `page:${pagination?.page || 1}`,
+          `limit${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, title, description, status, priority,
+                      assigned_to, created_by, created_at, updated_at
+               FROM tasks
+               WHERE assigned_to = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3`,
+              [context.user.id, limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch my task: ", error);
         throw error;
@@ -160,17 +233,30 @@ export const taskResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, title, description, status, priority,
-                assigned_to, created_by, created_at, updated_at
-         FROM tasks
-         WHERE created_by = $1
-         ORDER BY created_at DESC
-         LIMIT $2 OFFSET $3`,
-          [context.user.id, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.tasksByCreator,
+          context.user.id,
+          `page:${pagination?.page || 1}`,
+          `limit${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, title, description, status, priority,
+                      assigned_to, created_by, created_at, updated_at
+               FROM tasks
+               WHERE created_by = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3`,
+              [context.user.id, limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch my created task: ", error);
         throw error;
@@ -184,17 +270,30 @@ export const taskResolvers = {
         const limit = pagination?.limit || 10;
         const offset = ((pagination?.page || 1) - 1) * limit;
 
-        const result = await context.db.query(
-          `SELECT id, title, description, status, priority,
-                assigned_to, created_by, created_at, updated_at
-         FROM tasks
-         WHERE assigned_to = $1
-         ORDER BY created_at DESC
-         LIMIT $2 OFFSET $3`,
-          [userId, limit, offset]
+        const cacheKey = getCacheKey(
+          cachePrefix.myTasks,
+          userId,
+          `page:${pagination?.page || 1}`,
+          `limit${limit}`
         );
 
-        return result.rows;
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT id, title, description, status, priority,
+                      assigned_to, created_by, created_at, updated_at
+               FROM tasks
+               WHERE assigned_to = $1
+               ORDER BY created_at DESC
+               LIMIT $2 OFFSET $3`,
+              [userId, limit, offset]
+            );
+
+            return result.rows;
+          },
+          cacheTTL.list
+        );
       } catch (error) {
         console.error("Error fetch task by user: ", error);
         throw error;
@@ -205,38 +304,49 @@ export const taskResolvers = {
         requireAuth(context);
 
         const userId = context.user.id;
-
-        const result = await context.db.query(
-          `SELECT
-          COUNT(*) as total,
-          COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
-          COUNT(*) FILTER (WHERE status = 'IN_PROGRESS') as in_progress,
-          COUNT(*) FILTER (WHERE status = 'completed') as completed,
-          COUNT(*) FILTER (WHERE status = 'CANCELLED') as cancelled,
-          COUNT(*) FILTER (WHERE priority = 'LOW') as low,
-          COUNT(*) FILTER (WHERE priority = 'MEDIUM') as medium,
-          COUNT(*) FILTER (WHERE priority = 'HIGH') as high,
-          COUNT(*) FILTER (WHERE priority = 'URGENT') as urgent
-         FROM tasks
-         WHERE assigned_to = $1`,
-          [userId]
+        const cacheKey = getCacheKey(
+          cachePrefix.tasksByAssignee,
+          cachePrefix.stats,
+          userId
         );
 
-        const stats = result.rows[0];
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+                COUNT(*) FILTER (WHERE status = 'IN_PROGRESS') as in_progress,
+                COUNT(*) FILTER (WHERE status = 'COMPLETED') as completed,
+                COUNT(*) FILTER (WHERE status = 'CANCELLED') as cancelled,
+                COUNT(*) FILTER (WHERE priority = 'LOW') as low,
+                COUNT(*) FILTER (WHERE priority = 'MEDIUM') as medium,
+                COUNT(*) FILTER (WHERE priority = 'HIGH') as high,
+                COUNT(*) FILTER (WHERE priority = 'URGENT') as urgent
+              FROM tasks
+              WHERE assigned_to = $1`,
+              [userId]
+            );
 
-        return {
-          totalTasks: parseInt(stats.total),
-          pendingTasks: parseInt(stats.pending),
-          inProgressTasks: parseInt(stats.in_progress),
-          completedTasks: parseInt(stats.completed),
-          cancelledTasks: parseInt(stats.cancelled),
-          tasksByPriority: {
-            low: parseInt(stats.low),
-            medium: parseInt(stats.medium),
-            high: parseInt(stats.high),
-            urgent: parseInt(stats.urgent),
+            const stats = result.rows[0];
+
+            return {
+              totalTasks: parseInt(stats.total),
+              pendingTasks: parseInt(stats.pending),
+              inProgressTasks: parseInt(stats.in_progress),
+              completedTasks: parseInt(stats.completed),
+              cancelledTasks: parseInt(stats.cancelled),
+              tasksByPriority: {
+                low: parseInt(stats.low),
+                medium: parseInt(stats.medium),
+                high: parseInt(stats.high),
+                urgent: parseInt(stats.urgent),
+              },
+            };
           },
-        };
+          cacheTTL.stats
+        );
       } catch (error) {
         console.error("Error fetch task stats: ", error);
         throw error;
@@ -251,37 +361,49 @@ export const taskResolvers = {
           throw new Error("Not authorized to view this user's stats");
         }
 
-        const result = await context.db.query(
-          `SELECT
-          COUNT(*) as total,
-          COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
-          COUNT(*) FILTER (WHERE status = 'IN_PROGRESS') as in_progress,
-          COUNT(*) FILTER (WHERE status = 'completed') as completed,
-          COUNT(*) FILTER (WHERE status = 'CANCELLED') as cancelled,
-          COUNT(*) FILTER (WHERE priority = 'LOW') as low,
-          COUNT(*) FILTER (WHERE priority = 'MEDIUM') as medium,
-          COUNT(*) FILTER (WHERE priority = 'HIGH') as high,
-          COUNT(*) FILTER (WHERE priority = 'URGENT') as urgent
-         FROM tasks
-         WHERE assigned_to = $1`,
-          [userId]
+        const cacheKey = getCacheKey(
+          cachePrefix.tasksByAssignee,
+          cachePrefix.stats,
+          userId
         );
 
-        const stats = result.rows[0];
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+                COUNT(*) FILTER (WHERE status = 'IN_PROGRESS') as in_progress,
+                COUNT(*) FILTER (WHERE status = 'COMPLETED') as completed,
+                COUNT(*) FILTER (WHERE status = 'CANCELLED') as cancelled,
+                COUNT(*) FILTER (WHERE priority = 'LOW') as low,
+                COUNT(*) FILTER (WHERE priority = 'MEDIUM') as medium,
+                COUNT(*) FILTER (WHERE priority = 'HIGH') as high,
+                COUNT(*) FILTER (WHERE priority = 'URGENT') as urgent
+              FROM tasks
+              WHERE assigned_to = $1`,
+              [userId]
+            );
 
-        return {
-          totalTasks: parseInt(stats.total),
-          pendingTasks: parseInt(stats.pending),
-          inProgressTasks: parseInt(stats.in_progress),
-          completedTasks: parseInt(stats.completed),
-          cancelledTasks: parseInt(stats.cancelled),
-          tasksByPriority: {
-            low: parseInt(stats.low),
-            medium: parseInt(stats.medium),
-            high: parseInt(stats.high),
-            urgent: parseInt(stats.urgent),
+            const stats = result.rows[0];
+
+            return {
+              totalTasks: parseInt(stats.total),
+              pendingTasks: parseInt(stats.pending),
+              inProgressTasks: parseInt(stats.in_progress),
+              completedTasks: parseInt(stats.completed),
+              cancelledTasks: parseInt(stats.cancelled),
+              tasksByPriority: {
+                low: parseInt(stats.low),
+                medium: parseInt(stats.medium),
+                high: parseInt(stats.high),
+                urgent: parseInt(stats.urgent),
+              },
+            };
           },
-        };
+          cacheTTL.stats
+        );
       } catch (error) {
         console.error("Error fetch task stats by user: ", error);
         throw error;
@@ -296,35 +418,43 @@ export const taskResolvers = {
         //   throw new Error("Admin access required!");
         // }
 
-        const result = await context.db.query(
-          `SELECT
-          COUNT(*) as total,
-          COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
-          COUNT(*) FILTER (WHERE status = 'IN_PROGRESS') as in_progress,
-          COUNT(*) FILTER (WHERE status = 'completed') as completed,
-          COUNT(*) FILTER (WHERE status = 'CANCELLED') as cancelled,
-          COUNT(*) FILTER (WHERE priority = 'LOW') as low,
-          COUNT(*) FILTER (WHERE priority = 'MEDIUM') as medium,
-          COUNT(*) FILTER (WHERE priority = 'HIGH') as high,
-          COUNT(*) FILTER (WHERE priority = 'URGENT') as urgent
-         FROM tasks`
-        );
+        const cacheKey = getCacheKey(cachePrefix.tasksList, cachePrefix.stats);
 
-        const stats = result.rows[0];
+        return cacheAside(
+          cacheKey,
+          async () => {
+            const result = await context.db.query(
+              `SELECT
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'PENDING') as pending,
+                COUNT(*) FILTER (WHERE status = 'IN_PROGRESS') as in_progress,
+                COUNT(*) FILTER (WHERE status = 'COMPLETED') as completed,
+                COUNT(*) FILTER (WHERE status = 'CANCELLED') as cancelled,
+                COUNT(*) FILTER (WHERE priority = 'LOW') as low,
+                COUNT(*) FILTER (WHERE priority = 'MEDIUM') as medium,
+                COUNT(*) FILTER (WHERE priority = 'HIGH') as high,
+                COUNT(*) FILTER (WHERE priority = 'URGENT') as urgent
+              FROM tasks`
+            );
 
-        return {
-          totalTasks: parseInt(stats.total),
-          pendingTasks: parseInt(stats.pending),
-          inProgressTasks: parseInt(stats.in_progress),
-          completedTasks: parseInt(stats.completed),
-          cancelledTasks: parseInt(stats.cancelled),
-          tasksByPriority: {
-            low: parseInt(stats.low),
-            medium: parseInt(stats.medium),
-            high: parseInt(stats.high),
-            urgent: parseInt(stats.urgent),
+            const stats = result.rows[0];
+
+            return {
+              totalTasks: parseInt(stats.total),
+              pendingTasks: parseInt(stats.pending),
+              inProgressTasks: parseInt(stats.in_progress),
+              completedTasks: parseInt(stats.completed),
+              cancelledTasks: parseInt(stats.cancelled),
+              tasksByPriority: {
+                low: parseInt(stats.low),
+                medium: parseInt(stats.medium),
+                high: parseInt(stats.high),
+                urgent: parseInt(stats.urgent),
+              },
+            };
           },
-        };
+          cacheTTL.stats
+        );
       } catch (error) {
         console.error("Error fetch all tasks stats: ", error);
         throw error;
@@ -347,12 +477,10 @@ export const taskResolvers = {
       return context.loaders.commentsByTaskLoader.load(parent.id);
     },
     commentCount: async (parent, _, context) => {
-      const result = await context.db.query(
-        "SELECT COUNT(*) as count FROM comments WHERE task_id = $1",
-        [parent.id]
+      const comments = await context.loaders.commentsByTaskLoader.load(
+        parent.id
       );
-
-      return parseInt(result.rows[0].count);
+      return comments.length;
     },
   },
 
@@ -374,8 +502,8 @@ export const taskResolvers = {
 
         const result = await context.db.query(
           `INSERT INTO tasks (title, description, status, priority, assigned_to, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
+           VALUES ($1, $2, $3, $4, $5, $6)
+           RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
           [
             title,
             description,
@@ -385,6 +513,35 @@ export const taskResolvers = {
             context.user.id,
           ]
         );
+
+        // invalidate affected caches
+        await invalidateCachePattern(getCacheKey(cachePrefix.tasksList, "*"));
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.myTasks, assigned_to, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, context.user.id)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, context.user.id, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, assigned_to)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByStatus, status || "PENDING", "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByPriority, priority || "MEDIUM", "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(
+            cachePrefix.tasksByAssignee,
+            cachePrefix.stats,
+            assigned_to
+          )
+        );
+        getCacheKey(cachePrefix.tasksList, cachePrefix.stats);
 
         return result.rows[0];
       } catch (error) {
@@ -396,6 +553,15 @@ export const taskResolvers = {
     updateTask: async (_, { id, input }, context) => {
       try {
         requireAuth(context);
+
+        const oldTaskResult = await context.db.query(
+          "SELECT status, priority, assigned_to, created_by FROM tasks WHERE id = $1",
+          [id]
+        );
+
+        if (oldTaskResult.rows.length === 0) throw new Error("Task not found!");
+
+        const oldTask = oldTaskResult.rows[0];
 
         const updates = [];
         const values = [];
@@ -441,14 +607,73 @@ export const taskResolvers = {
 
         const result = await context.db.query(
           `UPDATE tasks
-         SET ${updates.join(", ")}
-          WHERE id = $${paramCount}
-          RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
+           SET ${updates.join(", ")}
+           WHERE id = $${paramCount}
+           RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
           values
         );
 
-        if (result.rows.length === 0) {
-          throw new Error("Task not found!");
+        const keysToInvalidate = [getCacheKey(cachePrefix.task, id)];
+
+        await invalidateMultiple(keysToInvalidate);
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.myTasks, oldTask.assigned_to, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, oldTask.created_by)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, oldTask.created_by, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, oldTask.assigned_to)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByTask, id)
+        );
+        await invalidateCachePattern(
+          getCacheKey(
+            cachePrefix.tasksByAssignee,
+            cachePrefix.stats,
+            oldTask.assigned_to
+          )
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksList, cachePrefix.stats)
+        );
+
+        if (input.assigned_to && input.assigned_to !== oldTask.assigned_to) {
+          await invalidateCachePattern(
+            getCacheKey(cachePrefix.myTasks, input.assigned_to, "*")
+          );
+          await invalidateCachePattern(
+            getCacheKey(cachePrefix.tasksByAssignee, input.assigned_to)
+          );
+          await invalidateCachePattern(
+            getCacheKey(
+              cachePrefix.tasksByAssignee,
+              cachePrefix.stats,
+              input.assigned_to
+            )
+          );
+        }
+
+        if (input.status && input.status !== oldTask.status) {
+          await invalidateCachePattern(
+            getCacheKey(cachePrefix.tasksByStatus, input.status, "*")
+          );
+          await invalidateCachePattern(
+            getCacheKey(cachePrefix.tasksByStatus, oldTask.status, "*")
+          );
+        }
+
+        if (input.priority && input.priority !== oldTask.priority) {
+          await invalidateCachePattern(
+            getCacheKey(cachePrefix.tasksByPriority, input.priority, "*")
+          );
+          await invalidateCachePattern(
+            getCacheKey(cachePrefix.tasksByPriority, oldTask.priority, "*")
+          );
         }
 
         return result.rows[0];
@@ -462,16 +687,25 @@ export const taskResolvers = {
       try {
         requireAuth(context);
 
-        const task = await context.db.query(
+        const taskResult = await context.db.query(
           `SELECT assigned_to, created_by
-         FROM tasks
-         WHERE id = $1`,
+           FROM tasks
+           WHERE id = $1`,
           [id]
         );
 
+        if (taskResult.rows.length === 0) {
+          return {
+            success: false,
+            message: "Task not found!",
+          };
+        }
+
+        const task = taskResult.rows[0];
+
         if (
-          task.rows[0].assigned_to !== context.user.id &&
-          task.rows[0].created_by !== context.user.id
+          task.assigned_to !== context.user.id &&
+          task.created_by !== context.user.id
         ) {
           return {
             success: false,
@@ -479,17 +713,42 @@ export const taskResolvers = {
           };
         }
 
-        const result = await context.db.query(
-          "DELETE FROM tasks WHERE id = $1 RETURNING id",
-          [id]
-        );
+        await context.db.query("DELETE FROM tasks WHERE id = $1", [id]);
 
-        if (result.rows.length === 0) {
-          return {
-            success: false,
-            message: "Task not found!",
-          };
-        }
+        // invalidate cache
+        await invalidateMultiple([getCacheKey(cachePrefix.task, id)]);
+        await invalidateCachePattern(getCacheKey(cachePrefix.tasksList, "*"));
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.myTasks, task.assigned_to, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, task.created_by)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, task.created_by, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, task.assigned_to)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByPriority, task.priority, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByStatus, task.status, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.commentsByTask, id)
+        );
+        await invalidateCachePattern(
+          getCacheKey(
+            cachePrefix.tasksByAssignee,
+            cachePrefix.stats,
+            task.assigned_to
+          )
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksList, cachePrefix.stats)
+        );
 
         return {
           success: true,
@@ -505,17 +764,59 @@ export const taskResolvers = {
       try {
         requireAuth(context);
 
+        const oldTaskResult = await db.query(
+          "SELECT status, priority ,assigned_to FROM tasks WHERE id = $1",
+          [taskId]
+        );
+
+        if (oldTaskResult.rows.length === 0) {
+          throw new Error("Task not found");
+        }
+
+        const oldTask = oldTaskResult.rows[0];
+
         const result = await context.db.query(
           `UPDATE tasks
-         SET assigned_to = $1, updated_at = NOW()
-         WHERE id = $2
-         RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
+           SET assigned_to = $1, updated_at = NOW()
+           WHERE id = $2
+           RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
           [userId, taskId]
         );
 
-        if (result.rows.length === 0) {
-          throw new Error("Task not found!");
-        }
+        // invalidate caches
+        await invalidateMultiple([getCacheKey(cachePrefix.task, taskId)]);
+        await invalidateCachePattern(getCacheKey(cachePrefix.tasksList, "*"));
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.myTasks, oldTask.assigned_to, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.myTasks, userId, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, oldTask.assigned_to)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, userId)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByPriority, oldTask.priority, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByStatus, oldTask.status, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(
+            cachePrefix.tasksByAssignee,
+            cachePrefix.stats,
+            oldTask.assigned_to
+          )
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, cachePrefix.stats, userId)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksList, cachePrefix.stats)
+        );
 
         return result.rows[0];
       } catch (error) {
@@ -528,6 +829,17 @@ export const taskResolvers = {
       try {
         requireAuth(context);
 
+        const taskResult = await db.query(
+          "SELECT assigned_to, created_by FROM tasks WHERE id = $1",
+          [taskId]
+        );
+
+        if (taskResult.rows.length === 0) {
+          throw new Error("Task not found");
+        }
+
+        const task = taskResult.rows[0];
+
         const result = await context.db.query(
           `UPDATE tasks
          SET status = $1, updated_at = NOW()
@@ -536,9 +848,44 @@ export const taskResolvers = {
           [status, taskId]
         );
 
-        if (result.rows.length === 0) {
-          throw new Error("Task not found!");
-        }
+        // invalidate cache
+        await invalidateMultiple([getCacheKey(cachePrefix.task, taskId)]);
+        await invalidateCachePattern(getCacheKey(cachePrefix.tasksList, "*"));
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.myTasks, task.assigned_to, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, task.created_by)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByCreator, task.created_by, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByAssignee, task.assigned_to)
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByStatus, task.status, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksByStatus, status, "*")
+        );
+        await invalidateCachePattern(
+          getCacheKey(
+            cachePrefix.tasksByAssignee,
+            cachePrefix.stats,
+            task.assigned_to
+          )
+        );
+        await invalidateCachePattern(
+          getCacheKey(
+            cachePrefix.tasksByAssignee,
+            cachePrefix.stats,
+            task.created_by
+          )
+        );
+        await invalidateCachePattern(
+          getCacheKey(cachePrefix.tasksList, cachePrefix.stats)
+        );
 
         return result.rows[0];
       } catch (error) {

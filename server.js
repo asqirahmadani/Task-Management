@@ -5,6 +5,7 @@ import resolvers from "./schema/resolvers/index.js";
 import typeDefs from "./schema/typeDefs/index.js";
 import { ApolloServer } from "@apollo/server";
 import pool from "./config/database.js";
+import redis from "./config/redis.js";
 
 const server = new ApolloServer({
   typeDefs,
@@ -19,20 +20,20 @@ const server = new ApolloServer({
           requestContext.request.operationName || "Anonymous";
 
         console.log("\n" + "=".repeat(80));
-        console.log(`🚀 GraphQL Request: ${operationName}`);
+        console.log(`GraphQL Request: ${operationName}`);
         console.log("=".repeat(80));
 
         return {
           async parsingDidStart() {
-            console.log("📝 Parsing query...");
+            console.log("Parsing query...");
           },
 
           async validationDidStart() {
-            console.log("✅ Validating query...");
+            console.log("Validating query...");
           },
 
           async executionDidStart() {
-            console.log("⚡ Executing query...\n");
+            console.log("Executing query...\n");
 
             requestContext.contextValue.db.resetQueryTracking();
           },
@@ -42,10 +43,10 @@ const server = new ApolloServer({
             const stats = responseContext.contextValue.db.getQueryStats();
 
             console.log("\n" + "-".repeat(80));
-            console.log("📊 REQUEST SUMMARY");
+            console.log("REQUEST SUMMARY");
             console.log("-".repeat(80));
-            console.log(`⏱️  Duration: ${duration}ms`);
-            console.log(`🔍 Queries: ${stats.count}`);
+            console.log(`Duration: ${duration}ms`);
+            console.log(`Queries: ${stats.count}`);
 
             if (stats.count > 0) {
               console.log(
@@ -54,18 +55,18 @@ const server = new ApolloServer({
             }
 
             if (responseContext.errors?.length > 0) {
-              console.log(`❌ Errors: ${responseContext.errors.length}`);
+              console.log(`Errors: ${responseContext.errors.length}`);
               responseContext.errors.forEach((error, i) => {
                 console.log(`   ${i + 1}. ${error.message}`);
               });
             }
 
             if (stats.count > 10) {
-              console.log("\n⚠️  High query count! Consider DataLoader.");
+              console.log("\nHigh query count! Consider DataLoader.");
             }
 
             if (duration > 1000) {
-              console.log("\n⚠️  Slow request (>1s)");
+              console.log("\nSlow request (>1s)");
             }
 
             console.log("=".repeat(80) + "\n");
@@ -87,15 +88,17 @@ const { url } = await startStandaloneServer(server, {
 
       return {
         db: pool,
+        redis,
         isAuth: auth.isAuth,
         user: auth.user,
         loaders,
       };
     } catch (error) {
-      console.error("❌ Context creation error:", error.message);
+      console.error("Context creation error:", error.message);
 
       return {
         db: pool,
+        redis,
         isAuth: false,
         user: null,
         loaders: createLoaders(pool),
@@ -105,3 +108,5 @@ const { url } = await startStandaloneServer(server, {
 });
 
 console.log(`🚀 Server ready at: ${url}`);
+console.log(`📊 PostgreSQL connected`);
+console.log(`💾 Redis connected`);

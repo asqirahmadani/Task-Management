@@ -42,9 +42,7 @@ pool.query = function (...args) {
   pool.queries.push(queryInfo);
 
   if (ENABLE_QUERY_LOGGING) {
-    console.log(
-      `🔍 Query #${pool.queryCount}: ${queryText.substring(0, 60)}...`
-    );
+    console.log(`Query #${pool.queryCount}: ${queryText.substring(0, 60)}...`);
   }
 
   return originalQuery(...args);
@@ -69,14 +67,14 @@ pool.getQueryStats = () => {
 const isDevelopment = process.env.NODE_ENV !== "production";
 
 pool.on("error", (err, client) => {
-  console.error("❌ Database pool error:", err.message);
+  console.error("Database pool error:", err.message);
   console.error("Error code:", err.code);
   console.error("Full error:", err);
 });
 
 if (isDevelopment) {
   pool.on("connect", () => {
-    console.log("✅ Database connected");
+    console.log("Database connected");
   });
 }
 
@@ -85,13 +83,13 @@ if (isDevelopment) {
 // ==========================================
 
 const gracefulShutdown = async (signal) => {
-  console.log(`\n⚠️  ${signal} received, closing database pool...`);
+  console.log(`\n${signal} received, closing database pool...`);
   try {
     await pool.end();
-    console.log("✅ Database pool closed");
+    console.log("Database pool closed");
     process.exit(0);
   } catch (error) {
-    console.error("❌ Error closing pool:", error.message);
+    console.error("Error closing pool:", error.message);
     process.exit(1);
   }
 };
