@@ -1,3 +1,4 @@
+import { publishEvent, SUBSCRIPTION_EVENTS } from "../../config/pubsub.js";
 import { requireAuth } from "../../utils/auth.js";
 import {
   cacheAside,
@@ -172,6 +173,8 @@ export const commentResolvers = {
           [task_id, context.user.id, text]
         );
 
+        const newComment = result.rows[0];
+
         // invalidate cache
         await invalidateCachePattern(
           getCacheKey(cachePrefix.commentsList, "*")
@@ -186,7 +189,59 @@ export const commentResolvers = {
           getCacheKey(cachePrefix.comment, cachePrefix.user, context.user.id)
         );
 
-        return result.rows[0];
+        // Publish Event: Comment Added
+        await publishEvent(SUBSCRIPTION_EVENTS.COMMENT_ADDED, {
+          comment: newComment,
+          addedBy: context.user,
+        });
+
+        const taskResult = await context.db.query(
+          "SELECT title, created_by, assigned_to FROM tasks WHERE id = $1",
+          [task_id]
+        );
+
+        if (taskResult.rows.length > 0) {
+          const task = taskResult.rows[0];
+
+          // Send notification
+          if (task.created_by !== context.user.id) {
+            await publishEvent(SUBSCRIPTION_EVENTS.NOTIFICATION_SENT, {
+              notification: {
+                id: `notif-${Date.now()}`,
+                userId: task.created_by,
+                type: "COMMENT_ADDED",
+                title: "New Comment",
+                message: `${context.user.name} commented on: ${task.title}`,
+                relatedComment: newComment,
+                createdAt: new Date().toISOString(),
+                read: false,
+              },
+            });
+          }
+
+          if (
+            task.assigned_to &&
+            task.assigned_to !== context.user.id &&
+            task.assigned_to !== task.created_by
+          ) {
+            await publishEvent(SUBSCRIPTION_EVENTS.NOTIFICATION_SENT, {
+              notification: {
+                id: `notif-${Date.now()}-2`,
+                userId: task.assigned_to,
+                type: "COMMENT_ADDED",
+                title: "New Comment",
+                message: `${context.user.name} commented on: ${task.title}`,
+                relatedComment: newComment,
+                createdAt: new Date().toISOString(),
+                read: false,
+              },
+            });
+          }
+        }
+
+        console.log(`Published: COMMENT_ADDED (task: ${task_id})`);
+
+        return newComment;
       } catch (error) {
         console.error("Error create comment: ", error);
         throw error;
@@ -222,6 +277,8 @@ export const commentResolvers = {
           [text, id]
         );
 
+        const updatedComment = result.rows[0];
+
         // invalidate cache
         await invalidateMultiple([getCacheKey(cachePrefix.comment, id)]);
         await invalidateCachePattern(
@@ -234,7 +291,15 @@ export const commentResolvers = {
           getCacheKey(cachePrefix.commentsByUser, context.user.id, "*")
         );
 
-        return result.rows[0];
+        // Publish Event: Comment Updated
+        await publishEvent(SUBSCRIPTION_EVENTS.COMMENT_UPDATED, {
+          comment: updatedComment,
+          updatedBy: context.user,
+        });
+
+        console.log(`Published: COMMENT_UPDATED (id: ${id})`);
+
+        return updatedComment;
       } catch (error) {
         console.error("Error update comment: ", error);
         throw error;
@@ -280,6 +345,16 @@ export const commentResolvers = {
         await invalidateCachePattern(
           getCacheKey(cachePrefix.comment, cachePrefix.user, comment.user.id)
         );
+
+        // Publish Event: Comment Deleted
+        await publishEvent(SUBSCRIPTION_EVENTS.COMMENT_DELETED, {
+          commentId: id,
+          taskId: comment.task_id,
+          deletedBy: context.user,
+          deletedAt: new Date().toISOString(),
+        });
+
+        console.log(`Published: COMMENT_DELETED (id: ${id})`);
 
         return {
           success: true,

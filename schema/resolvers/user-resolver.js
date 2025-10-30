@@ -1,3 +1,4 @@
+import { publishEvent, SUBSCRIPTION_EVENTS } from "../../config/pubsub.js";
 import { requireAuth } from "../../utils/auth.js";
 import bcrypt from "bcryptjs";
 import {
@@ -51,7 +52,7 @@ export const userResolvers = {
 
         const cacheKey = getCacheKey(
           cachePrefix.usersList,
-          `page:${pagination.page || 1}`,
+          `page:${pagination?.page || 1}`,
           `limit:${limit}`
         );
 
@@ -86,7 +87,7 @@ export const userResolvers = {
         const cacheKey = getCacheKey(
           cachePrefix.usersList,
           cachePrefix.search,
-          `page:${pagination.page || 1}`,
+          `page:${pagination?.page || 1}`,
           `limit:${limit}`
         );
 
@@ -258,6 +259,26 @@ export const userResolvers = {
         console.error("Error delete user: ", error);
         throw error;
       }
+    },
+
+    setTypingIndicator: async (_, { taskId, isTyping }, context) => {
+      requireAuth(context);
+
+      // Publish Event: User Typing
+      await publishEvent(SUBSCRIPTION_EVENTS.USER_TYPING, {
+        user: {
+          id: context.user.id,
+          name: context.user.name,
+        },
+        taskId,
+        isTyping,
+      });
+
+      console.log(
+        `Published: USER_TYPING (user: ${context.user.name}, isTyping: ${isTyping})`
+      );
+
+      return true;
     },
   },
 };

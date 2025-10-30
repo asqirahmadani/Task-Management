@@ -1,3 +1,4 @@
+import { publishEvent, SUBSCRIPTION_EVENTS } from "../../config/pubsub.js";
 import { requireAuth } from "../../utils/auth.js";
 import {
   cacheAside,
@@ -514,6 +515,8 @@ export const taskResolvers = {
           ]
         );
 
+        const newTask = result.rows[0];
+
         // invalidate affected caches
         await invalidateCachePattern(getCacheKey(cachePrefix.tasksList, "*"));
         await invalidateCachePattern(
@@ -543,7 +546,30 @@ export const taskResolvers = {
         );
         getCacheKey(cachePrefix.tasksList, cachePrefix.stats);
 
-        return result.rows[0];
+        // Publish Event: Task Created
+        await publishEvent(SUBSCRIPTION_EVENTS.TASK_CREATED, {
+          task: newTask,
+        });
+
+        if (assigned_to !== context.user.id) {
+          // Send Notification
+          await publishEvent(SUBSCRIPTION_EVENTS.NOTIFICATION_SENT, {
+            notification: {
+              id: `notif-${Date.now()}`,
+              userId: assigned_to,
+              type: "TASK_ASSIGNED",
+              title: "New Task Assigned",
+              message: `${context.user.name} assigned you task: ${title}`,
+              relatedTask: newTask,
+              createdAt: new Date().toISOString(),
+              read: false,
+            },
+          });
+        }
+
+        console.log(`Published: TASK_CREATED (id: ${newTask.id})`);
+
+        return newTask;
       } catch (error) {
         console.error("Error create task: ", error);
         throw error;
@@ -613,6 +639,8 @@ export const taskResolvers = {
           values
         );
 
+        const updatedTask = result.rows[0];
+
         const keysToInvalidate = [getCacheKey(cachePrefix.task, id)];
 
         await invalidateMultiple(keysToInvalidate);
@@ -676,7 +704,53 @@ export const taskResolvers = {
           );
         }
 
-        return result.rows[0];
+        // Publish Event: Task Updated
+        await publishEvent(SUBSCRIPTION_EVENTS.TASK_UPDATED, {
+          task: updatedTask,
+          updatedBy: context.user,
+        });
+
+        if (input.status && input.status !== oldTask.status) {
+          // Publish Event: Task Status Changed
+          await publishEvent(SUBSCRIPTION_EVENTS.TASK_STATUS_CHANGED, {
+            task: updatedTask,
+            oldStatus: oldTask.status,
+            newStatus: input.status,
+            changedBy: context.user,
+          });
+          console.log(
+            `Published: TASK_STATUS_CHANGED (${oldTask.status} → ${input.status})`
+          );
+        }
+
+        if (input.assigned_to && input.assigned_to !== oldTask.assigned_to) {
+          // Publish Event: Task Assigned
+          await publishEvent(SUBSCRIPTION_EVENTS.TASK_ASSIGNED, {
+            task: updatedTask,
+            assignedBy: context.user,
+          });
+
+          // Send notification
+          await publishEvent(SUBSCRIPTION_EVENTS.NOTIFICATION_SENT, {
+            notification: {
+              id: `notif-${Date.now()}`,
+              userId: input.assigned_to,
+              type: "TASK_ASSIGNED",
+              title: "Task Reassigned",
+              message: `${context.user.name} assigned you task: ${updatedTask.title}`,
+              relatedTask: updatedTask,
+              createdAt: new Date().toISOString(),
+              read: false,
+            },
+          });
+          console.log(
+            `Published: TASK_ASSIGNED (to user: ${input.assigned_to})`
+          );
+        }
+
+        console.log(`Published: TASK_UPDATED (id: ${id})`);
+
+        return updatedTask;
       } catch (error) {
         console.error("Error update task: ", error);
         throw error;
@@ -750,6 +824,15 @@ export const taskResolvers = {
           getCacheKey(cachePrefix.tasksList, cachePrefix.stats)
         );
 
+        // Publish event: Task Deleted
+        await publishEvent(SUBSCRIPTION_EVENTS.TASK_DELETED, {
+          taskId: id,
+          deletedBy: context.user,
+          deletedAt: new Date().toISOString(),
+        });
+
+        console.log(`Published: TASK_DELETED (id: ${id})`);
+
         return {
           success: true,
           message: "Task deleted successfully!",
@@ -782,6 +865,8 @@ export const taskResolvers = {
            RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
           [userId, taskId]
         );
+
+        const updatedTask = result.rows[0];
 
         // invalidate caches
         await invalidateMultiple([getCacheKey(cachePrefix.task, taskId)]);
@@ -818,7 +903,37 @@ export const taskResolvers = {
           getCacheKey(cachePrefix.tasksList, cachePrefix.stats)
         );
 
-        return result.rows[0];
+        // Publish Event: Task Assigned
+        await publishEvent(SUBSCRIPTION_EVENTS.TASK_ASSIGNED, {
+          task: updatedTask,
+          assignedBy: context.user,
+        });
+
+        // Publish Event: Task Updated
+        await publishEvent(SUBSCRIPTION_EVENTS.TASK_UPDATED, {
+          task: updatedTask,
+          updatedBy: context.user,
+        });
+
+        // Send notification
+        if (userId !== context.user.id) {
+          await publishEvent(SUBSCRIPTION_EVENTS.NOTIFICATION_SENT, {
+            notification: {
+              id: `notif-${Date.now()}`,
+              userId: userId,
+              type: "TASK_ASSIGNED",
+              title: "Task Assigned",
+              message: `${context.user.name} assigned you task: ${updatedTask.title}`,
+              relatedTask: updatedTask,
+              createdAt: new Date().toISOString(),
+              read: false,
+            },
+          });
+        }
+
+        console.log(`Published: TASK_ASSIGNED (to user: ${userId})`);
+
+        return updatedTask;
       } catch (error) {
         console.error("Error assign task: ", error);
         throw error;
@@ -830,7 +945,7 @@ export const taskResolvers = {
         requireAuth(context);
 
         const taskResult = await db.query(
-          "SELECT assigned_to, created_by FROM tasks WHERE id = $1",
+          "SELECT status, assigned_to, created_by FROM tasks WHERE id = $1",
           [taskId]
         );
 
@@ -847,6 +962,8 @@ export const taskResolvers = {
          RETURNING id, title, description, status, priority, assigned_to, created_by, created_at, updated_at`,
           [status, taskId]
         );
+
+        const updatedTask = result.rows[0];
 
         // invalidate cache
         await invalidateMultiple([getCacheKey(cachePrefix.task, taskId)]);
@@ -887,7 +1004,41 @@ export const taskResolvers = {
           getCacheKey(cachePrefix.tasksList, cachePrefix.stats)
         );
 
-        return result.rows[0];
+        // Publish Event: Status Changed
+        await publishEvent(SUBSCRIPTION_EVENTS.TASK_STATUS_CHANGED, {
+          task: updatedTask,
+          oldStatus: task.status,
+          newStatus: status,
+          changedBy: context.user,
+        });
+
+        // Publish Event: Task Updated
+        await publishEvent(SUBSCRIPTION_EVENTS.TASK_UPDATED, {
+          task: updatedTask,
+          updatedBy: context.user,
+        });
+
+        // Send notification if status is COMPLETED
+        if (status === "COMPLETED" && task.created_by !== context.user.id) {
+          await publishEvent(SUBSCRIPTION_EVENTS.NOTIFICATION_SENT, {
+            notification: {
+              id: `notif-${Date.now()}`,
+              userId: task.created_by,
+              type: "TASK_COMPLETED",
+              title: "Task Completed",
+              message: `${context.user.name} completed task: ${updatedTask.title}`,
+              relatedTask: updatedTask,
+              createdAt: new Date().toISOString(),
+              read: false,
+            },
+          });
+        }
+
+        console.log(
+          `Published: TASK_STATUS_CHANGED (${task.status} → ${status})`
+        );
+
+        return updatedTask;
       } catch (error) {
         console.error("Error change task's status: ", error);
         throw error;

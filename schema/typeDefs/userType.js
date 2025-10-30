@@ -38,6 +38,7 @@ export const userTypeDefs = `
         updateUserProfile(input: updateUserProfileInput!): User!
         changePassword(input: changePasswordInput): FormatResponses!
         deleteUser(id: ID!): FormatResponses!
+        setTypingIndicator(taskId: ID!, isTyping: Boolean!): Boolean!
     }
 
     extend type Query {
