@@ -10,21 +10,27 @@ import {
   cachePrefix,
   getCacheKey,
 } from "../../config/cache-config.js";
+import {
+  validateUUID,
+  validatePagination,
+  validateTaskInput,
+} from "../../utils/inputValidator.js";
 
 export const taskResolvers = {
   Query: {
     getAllTasks: async (_, { filter, pagination }, context) => {
       try {
         requireAuth(context);
+        const validatedPagination = validatePagination(pagination);
 
-        const limit = pagination?.limit || 10;
-        const offset = ((pagination?.page || 1) - 1) * limit;
+        const limit = validatedPagination.limit;
+        const offset = (validatedPagination.page - 1) * limit;
 
         const cacheKey = getCacheKey(
           cachePrefix.tasksList,
           cachePrefix.search,
           JSON.stringify(filter),
-          `page:${pagination?.page || 1}`,
+          `page:${validatedPagination.page}`,
           `limit${limit}`
         );
 
@@ -87,6 +93,7 @@ export const taskResolvers = {
     getTask: async (_, { id }, context) => {
       try {
         requireAuth(context);
+        validateUUID(id, "Task ID");
 
         const cacheKey = getCacheKey(cachePrefix.task, id);
 
@@ -119,14 +126,15 @@ export const taskResolvers = {
     getTasksByStatus: async (_, { status, pagination }, context) => {
       try {
         requireAuth(context);
+        const validatedPagination = validatePagination(pagination);
 
-        const limit = pagination?.limit || 10;
-        const offset = ((pagination?.page || 1) - 1) * limit;
+        const limit = validatedPagination.limit;
+        const offset = (validatedPagination.page - 1) * limit;
 
         const cacheKey = getCacheKey(
           cachePrefix.tasksByStatus,
           status,
-          `page:${pagination?.page || 1}`,
+          `page:${validatedPagination.page}`,
           `limit${limit}`
         );
 
@@ -156,14 +164,15 @@ export const taskResolvers = {
     getTasksByPriority: async (_, { priority, pagination }, context) => {
       try {
         requireAuth(context);
+        const validatedPagination = validatePagination(pagination);
 
-        const limit = pagination?.limit || 10;
-        const offset = ((pagination?.page || 1) - 1) * limit;
+        const limit = validatedPagination.limit;
+        const offset = (validatedPagination.page - 1) * limit;
 
         const cacheKey = getCacheKey(
           cachePrefix.tasksByPriority,
           priority,
-          `page:${pagination?.page || 1}`,
+          `page:${validatedPagination.page}`,
           `limit${limit}`
         );
 
@@ -193,14 +202,15 @@ export const taskResolvers = {
     getMyTasks: async (_, { pagination }, context) => {
       try {
         requireAuth(context);
+        const validatedPagination = validatePagination(pagination);
 
-        const limit = pagination?.limit || 10;
-        const offset = ((pagination?.page || 1) - 1) * limit;
+        const limit = validatedPagination.limit;
+        const offset = (validatedPagination.page - 1) * limit;
 
         const cacheKey = getCacheKey(
           cachePrefix.myTasks,
           context.user.id,
-          `page:${pagination?.page || 1}`,
+          `page:${validatedPagination.page}`,
           `limit${limit}`
         );
 
@@ -230,14 +240,15 @@ export const taskResolvers = {
     getTasksCreatedByMe: async (_, { pagination }, context) => {
       try {
         requireAuth(context);
+        const validatedPagination = validatePagination(pagination);
 
-        const limit = pagination?.limit || 10;
-        const offset = ((pagination?.page || 1) - 1) * limit;
+        const limit = validatedPagination.limit;
+        const offset = (validatedPagination.page - 1) * limit;
 
         const cacheKey = getCacheKey(
           cachePrefix.tasksByCreator,
           context.user.id,
-          `page:${pagination?.page || 1}`,
+          `page:${validatedPagination.page}`,
           `limit${limit}`
         );
 
@@ -267,14 +278,15 @@ export const taskResolvers = {
     getTasksByUser: async (_, { userId, pagination }, context) => {
       try {
         requireAuth(context);
+        const validatedPagination = validatePagination(pagination);
 
-        const limit = pagination?.limit || 10;
-        const offset = ((pagination?.page || 1) - 1) * limit;
+        const limit = validatedPagination.limit;
+        const offset = (validatedPagination.page - 1) * limit;
 
         const cacheKey = getCacheKey(
           cachePrefix.myTasks,
           userId,
-          `page:${pagination?.page || 1}`,
+          `page:${validatedPagination.page}`,
           `limit${limit}`
         );
 
@@ -489,8 +501,10 @@ export const taskResolvers = {
     createTask: async (_, { input }, context) => {
       try {
         requireAuth(context);
+        const validatedInput = validateTaskInput(input);
 
-        const { title, description, status, priority, assigned_to } = input;
+        const { title, description, status, priority, assigned_to } =
+          validatedInput;
 
         const user = await context.db.query(
           "SELECT id FROM users WHERE id = $1",
@@ -579,6 +593,8 @@ export const taskResolvers = {
     updateTask: async (_, { id, input }, context) => {
       try {
         requireAuth(context);
+        validateUUID(id, "Task ID");
+        validateTaskInput(input);
 
         const oldTaskResult = await context.db.query(
           "SELECT status, priority, assigned_to, created_by FROM tasks WHERE id = $1",
@@ -760,6 +776,7 @@ export const taskResolvers = {
     deleteTask: async (_, { id }, context) => {
       try {
         requireAuth(context);
+        validateUUID(id, "Task ID");
 
         const taskResult = await context.db.query(
           `SELECT assigned_to, created_by
@@ -846,6 +863,8 @@ export const taskResolvers = {
     assignTask: async (_, { taskId, userId }, context) => {
       try {
         requireAuth(context);
+        validateUUID(taskId, "Task ID");
+        validateUUID(userId, "User ID");
 
         const oldTaskResult = await db.query(
           "SELECT status, priority ,assigned_to FROM tasks WHERE id = $1",
@@ -943,6 +962,7 @@ export const taskResolvers = {
     changeTaskStatus: async (_, { taskId, status }, context) => {
       try {
         requireAuth(context);
+        validateUUID(taskId, "Task ID");
 
         const taskResult = await db.query(
           "SELECT status, assigned_to, created_by FROM tasks WHERE id = $1",

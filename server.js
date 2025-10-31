@@ -8,14 +8,20 @@ import { WebSocketServer } from "ws";
 import bodyParser from "body-parser";
 import { createServer } from "http";
 import express from "express";
+import helmet from "helmet";
 import cors from "cors";
 
 import { authMiddleware } from "./middleware/auth-middleware.js";
+import { rateLimitPlugin } from "./utils/rateLimiter.js";
 import { createLoaders } from "./utils/dataLoader.js";
 import resolvers from "./schema/resolvers/index.js";
 import typeDefs from "./schema/typeDefs/index.js";
 import pool from "./config/database.js";
 import redis from "./config/redis.js";
+import {
+  depthLimitRule,
+  complexityLimitRule,
+} from "./middleware/security-middleware.js";
 
 const schema = makeExecutableSchema({
   typeDefs,
@@ -59,10 +65,6 @@ const serverCleanUp = useServer(
     },
 
     onSubscribe: async (ctx, msg) => {
-      console.log("\n=== DEBUG CTX STRUCTURE ===");
-      console.log("ctx keys:", Object.keys(ctx));
-      console.log("===========================\n");
-
       const operationName = ctx.operationName || "Anonymous";
       console.log(`📡 Subscription: ${operationName}`);
     },
@@ -81,6 +83,8 @@ const serverCleanUp = useServer(
 const server = new ApolloServer({
   schema,
 
+  validationRules: [depthLimitRule, complexityLimitRule],
+
   plugins: [
     ApolloServerPluginDrainHttpServer({ httpServer }),
 
@@ -97,8 +101,17 @@ const server = new ApolloServer({
     {
       async requestDidStart(requestContext) {
         const startTime = Date.now();
-        const operationName =
-          requestContext.request.operationName || "Anonymous";
+
+        let operationName = requestContext.request.operationName;
+
+        if (!operationName && requestContext.request.query) {
+          const match = requestContext.request.query.match(
+            /(?:query|mutation|subscription)\s+(\w+)/
+          );
+          operationName = match ? match[1] : "Anonymous";
+        }
+
+        operationName = operationName || "Anonymous";
 
         if (operationName === "IntrospectionQuery") {
           return {};
@@ -141,14 +154,56 @@ const server = new ApolloServer({
         };
       },
     },
+
+    rateLimitPlugin,
   ],
 });
 
 await server.start();
 
 app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "https:"],
+      },
+    },
+    hsts: {
+      maxAge: 31536000, // 1 year
+      includeSubDomains: true,
+      preload: true,
+    },
+  })
+);
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    // Allowed origins
+    const allowedOrigins = [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "https://yourdomain.com",
+      process.env.FRONTEND_URL,
+    ].filter(Boolean);
+
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  maxAge: 86400, // 24 hours
+};
+
+app.use(
   "/graphql",
-  cors(),
+  cors(corsOptions),
   bodyParser.json(),
   expressMiddleware(server, {
     context: async ({ req }) => {
