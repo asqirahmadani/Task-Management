@@ -1,4 +1,4 @@
-import { subscriptionTypeDefs } from "./subscription-type.js";
+import { subscriptionTypeDefs } from "./subscriptionType.js";
 import { commentTypeDefs } from "./commentType.js";
 import { baseTypeDefs } from "./baseType.js";
 import { taskTypeDefs } from "./taskType.js";

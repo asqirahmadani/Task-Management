@@ -12,18 +12,15 @@ import helmet from "helmet";
 import cors from "cors";
 
 import { extractOperationName } from "./utils/inputValidator.js";
-import { authMiddleware } from "./middleware/auth-middleware.js";
 import { rateLimitPlugin } from "./utils/rateLimiter.js";
 import { logGraphQLOperation } from "./utils/logger.js";
+import { authMiddleware } from "./middleware/auth.js";
 import { createLoaders } from "./utils/dataLoader.js";
 import resolvers from "./schema/resolvers/index.js";
 import typeDefs from "./schema/typeDefs/index.js";
 import pool from "./config/database.js";
 import redis from "./config/redis.js";
-import {
-  depthLimitRule,
-  complexityLimitRule,
-} from "./middleware/security-middleware.js";
+import { depthLimitRule, complexityLimitRule } from "./middleware/security.js";
 
 const schema = makeExecutableSchema({
   typeDefs,
