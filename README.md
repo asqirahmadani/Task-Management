@@ -10,7 +10,7 @@
 
 **A production-ready GraphQL API for task management with real-time updates, advanced caching, and enterprise-grade security**
 
-[Features](#-features) • [Quick Start](#-quick-start) • [API Documentation](#-api-documentation) • [Architecture](#-architecture) • [Security](#-security)
+[Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [Security](#-security)
 
 </div>
 
