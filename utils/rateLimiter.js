@@ -1,3 +1,5 @@
+import { extractOperationName } from "./inputValidator.js";
+import { logSecurityEvent } from "./logger.js";
 import redis from "../config/redis.js";
 
 export const tokenBucketRateLimit = async (
@@ -29,7 +31,12 @@ export const tokenBucketRateLimit = async (
     if (tokens < cost) {
       const refillTime = Math.ceil((cost - tokens) / refillRate);
 
-      console.log(`Rate limit exceeded for ${identifier}`);
+      logSecurityEvent("RATE_LIMIT_EXCEEDED", {
+        identifier,
+        tokensAvailable: Math.floor(tokens),
+        tokensRequired: cost,
+        maxTokens,
+      });
 
       return {
         allowed: false,
@@ -203,8 +210,7 @@ export const rateLimitPlugin = {
     return {
       async didResolveOperation(operationContext) {
         const { operation, contextValue } = operationContext;
-        const operationName = operation.name?.value || "Anonymous";
-        console.log(operationName);
+        const operationName = extractOperationName(operation.loc.source.body);
 
         if (operationName === "IntrospectionQuery") {
           return;

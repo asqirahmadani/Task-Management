@@ -262,3 +262,41 @@ export const validateUserInput = (input) => {
 
   return validated;
 };
+
+export const extractOperationName = (query, providedName) => {
+  if (!query) return providedName || "Anonymous";
+
+  try {
+    const cleanQuery = query
+      .replace(/#[^\n]*/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const fieldMatch = cleanQuery.match(
+      /(?:query|mutation|subscription)?\s*(?:\w+)?\s*\{\s*(\w+)/i
+    );
+
+    if (fieldMatch && fieldMatch[1]) {
+      const fieldName = fieldMatch[1];
+      if (
+        !["query", "mutation", "subscription", "__schema", "__type"].includes(
+          fieldName.toLowerCase()
+        )
+      ) {
+        return fieldName;
+      }
+    }
+
+    const opMatch = cleanQuery.match(
+      /(?:query|mutation|subscription)\s+(\w+)/i
+    );
+
+    if (opMatch && opMatch[1]) {
+      return opMatch[1];
+    }
+  } catch (error) {
+    console.warn("Failed to extract operation name:", error.message);
+  }
+
+  return providedName || "Anonymous";
+};

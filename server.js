@@ -11,8 +11,10 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 
+import { extractOperationName } from "./utils/inputValidator.js";
 import { authMiddleware } from "./middleware/auth-middleware.js";
 import { rateLimitPlugin } from "./utils/rateLimiter.js";
+import { logGraphQLOperation } from "./utils/logger.js";
 import { createLoaders } from "./utils/dataLoader.js";
 import resolvers from "./schema/resolvers/index.js";
 import typeDefs from "./schema/typeDefs/index.js";
@@ -45,7 +47,6 @@ const serverCleanUp = useServer(
       const auth = await authMiddleware({
         headers: { authorization: token },
       });
-      console.log(auth);
 
       return {
         redis,
@@ -65,6 +66,7 @@ const serverCleanUp = useServer(
     },
 
     onSubscribe: async (ctx, msg) => {
+      console.log(ctx);
       const operationName = ctx.operationName || "Anonymous";
       console.log(`📡 Subscription: ${operationName}`);
     },
@@ -102,24 +104,15 @@ const server = new ApolloServer({
       async requestDidStart(requestContext) {
         const startTime = Date.now();
 
-        let operationName = requestContext.request.operationName;
-
-        if (!operationName && requestContext.request.query) {
-          const match = requestContext.request.query.match(
-            /(?:query|mutation|subscription)\s+(\w+)/
-          );
-          operationName = match ? match[1] : "Anonymous";
-        }
-
-        operationName = operationName || "Anonymous";
+        let operationName = extractOperationName(requestContext.request.query);
 
         if (operationName === "IntrospectionQuery") {
           return {};
         }
 
-        console.log("\n" + "=".repeat(80));
-        console.log(`GraphQL Request: ${operationName}`);
-        console.log("=".repeat(80));
+        // console.log("\n" + "=".repeat(80));
+        // console.log(`GraphQL Request: ${operationName}`);
+        // console.log("=".repeat(80));
 
         return {
           async executionDidStart() {
@@ -130,11 +123,13 @@ const server = new ApolloServer({
             const duration = Date.now() - startTime;
             const stats = responseContext.contextValue.db.getQueryStats();
 
-            console.log("\n" + "-".repeat(80));
-            console.log("REQUEST SUMMARY");
-            console.log("-".repeat(80));
-            console.log(`Duration: ${duration}ms`);
-            console.log(`Queries: ${stats.count}`);
+            // console.log("\n" + "-".repeat(80));
+            // console.log("REQUEST SUMMARY");
+            // console.log("-".repeat(80));
+            // console.log(`Duration: ${duration}ms`);
+            // console.log(`Queries: ${stats.count}`);
+
+            logGraphQLOperation(operationName, duration, true);
 
             if (stats.count > 0) {
               console.log(
@@ -145,7 +140,12 @@ const server = new ApolloServer({
             if (responseContext.errors?.length > 0) {
               console.log(`Errors: ${responseContext.errors.length}`);
               responseContext.errors.forEach((error, i) => {
-                console.log(`   ${i + 1}. ${error.message}`);
+                logGraphQLOperation(
+                  operationName,
+                  duration,
+                  false,
+                  error.message
+                );
               });
             }
 

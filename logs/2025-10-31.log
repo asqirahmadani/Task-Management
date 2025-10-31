@@ -1,0 +1,11 @@
+{"timestamp":"2025-10-31T00:40:25.508Z","level":"INFO","message":"GraphQL: Anonymous","operation":"Anonymous","duration":"2663ms","success":true}
+{"timestamp":"2025-10-31T00:41:47.210Z","level":"INFO","message":"GraphQL: Anonymous","operation":"Anonymous","duration":"161ms","success":true}
+{"timestamp":"2025-10-31T00:51:19.175Z","level":"INFO","message":"GraphQL: Anonymous","operation":"Anonymous","duration":"857ms","success":true}
+{"timestamp":"2025-10-31T00:52:01.706Z","level":"INFO","message":"GraphQL: getTask","operation":"getTask","duration":"156ms","success":true}
+{"timestamp":"2025-10-31T00:53:29.815Z","level":"INFO","message":"GraphQL: getTask","operation":"getTask","duration":"212ms","success":true}
+{"timestamp":"2025-10-31T00:56:11.896Z","level":"INFO","message":"GraphQL: getTask","operation":"getTask","duration":"152ms","success":true}
+{"timestamp":"2025-10-31T00:56:44.523Z","level":"INFO","message":"GraphQL: getTask","operation":"getTask","duration":"145ms","success":true}
+{"timestamp":"2025-10-31T00:57:09.240Z","level":"INFO","message":"GraphQL: getTask","operation":"getTask","duration":"160ms","success":true}
+{"timestamp":"2025-10-31T00:58:47.951Z","level":"INFO","message":"GraphQL: getAllTasks","operation":"getAllTasks","duration":"1576ms","success":true}
+{"timestamp":"2025-10-31T00:59:55.391Z","level":"INFO","message":"GraphQL: getGlobalTaskStats","operation":"getGlobalTaskStats","duration":"321ms","success":true}
+{"timestamp":"2025-10-31T01:00:13.611Z","level":"INFO","message":"GraphQL: getGlobalTaskStats","operation":"getGlobalTaskStats","duration":"223ms","success":true}
